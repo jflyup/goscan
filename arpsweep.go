@@ -119,18 +119,11 @@ func scan(iface *pcap.Interface) error {
 	// Start up a goroutine to read in packet data.
 	stop := make(chan struct{})
 	go readARP(handle, mac, stop)
-	//defer close(stop)
-	ticker := time.NewTicker(time.Second * 5)
-	go func() {
-		for t := range ticker.C {
-			if err := writeARP(handle, mac, addr); err != nil {
-				log.Printf("error writing packets on %v %v: %v", t, iface.Name, err)
-				ticker.Stop()
-			}
+	if err := writeARP(handle, mac, addr); err != nil {
+		log.Printf("error writing packets on %v: %v", iface.Name, err)
+	}
 
-		}
-	}()
-	timer := time.NewTimer(time.Second * 20)
+	timer := time.NewTimer(time.Second * 30)
 	<-timer.C
 	close(stop)
 	return nil
@@ -208,12 +201,16 @@ func writeARP(handle *pcap.Handle, mac net.HardwareAddr, addr *net.IPNet) error 
 		ComputeChecksums: true,
 	}
 
+	var count int
+
 	if len(os.Args) > 1 {
 		ip := net.ParseIP(os.Args[1])
 		log.Printf("sending arp")
 		arp.DstProtAddress = ip.To4()
 		gopacket.SerializeLayers(buf, opts, &eth, &arp)
-		if err := handle.WritePacketData(buf.Bytes()[:42]); err != nil {
+		// Ethernet requires that all packets be at least 60 bytes long,
+		// 64 bytes if you include the Frame Check Sequence at the end
+		if err := handle.WritePacketData(buf.Bytes()); err != nil {
 			return err
 		}
 	} else {
@@ -226,8 +223,14 @@ func writeARP(handle *pcap.Handle, mac net.HardwareAddr, addr *net.IPNet) error 
 				if err := handle.WritePacketData(buf.Bytes()); err != nil {
 					return err
 				}
+				count++
 			}
 			mutex.Unlock()
+
+			// mimic Fing
+			if count == 100 {
+				go writeARP(handle, mac, addr)
+			}
 			time.Sleep(time.Millisecond * 10)
 		}
 	}
