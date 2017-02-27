@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 	"log"
 	"net"
 	"os"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	//"github.com/hashicorp/mdns"
 	"sync"
 	"time"
@@ -157,7 +158,14 @@ func readARP(handle *pcap.Handle, mac net.HardwareAddr, stop chan struct{}) {
 				// This is a packet I sent.
 				continue
 			} else if arp.Operation == layers.ARPRequest {
-				log.Printf("got broadcast arp from %v", net.HardwareAddr(arp.SourceHwAddress))
+				// got broadcast arp request, consider the source host is alive
+				// TODO RWMutex?
+				mutex.Lock()
+				if _, ok := liveHosts[net.IP(arp.SourceProtAddress).String()]; ok {
+					liveHosts[net.IP(arp.SourceProtAddress).String()] = arp.SourceHwAddress
+				}
+				mutex.Unlock()
+				//log.Printf("got broadcast arp from %v", net.HardwareAddr(arp.SourceHwAddress))
 				continue
 			}
 			mutex.Lock()
@@ -237,8 +245,8 @@ func ips(n *net.IPNet) (out []net.IP) {
 		var buf [4]byte
 		binary.BigEndian.PutUint32(buf[:], num)
 		out = append(out, net.IP(buf[:]))
-		mask += 1
-		num += 1
+		mask++
+		num++
 	}
 	return
 }
