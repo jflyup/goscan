@@ -17,11 +17,13 @@ import (
 )
 
 var liveHosts map[string][]byte
+var hostnames map[string]string
 var mutex = &sync.Mutex{}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	liveHosts = make(map[string][]byte)
+	hostnames = make(map[string]string)
 	// Get a list of all interfaces.
 	//ifaces, err := net.Interfaces()
 	//if err != nil {
@@ -123,10 +125,40 @@ func scan(iface *pcap.Interface) error {
 		log.Printf("error writing packets on %v: %v", iface.Name, err)
 	}
 
-	timer := time.NewTimer(time.Second * 30)
+	// exit program after scanning for 20s
+	timer := time.NewTimer(time.Second * 20)
 	<-timer.C
 	close(stop)
+	log.Printf("find %d hosts", len(liveHosts))
+	for k, v := range liveHosts {
+		if name, ok := hostnames[k]; ok {
+			log.Printf("IP %s(%s) is at %v", k, name, net.HardwareAddr(v))
+		} else {
+			log.Printf("IP %s is at %v", k, net.HardwareAddr(v))
+		}
+	}
 	return nil
+}
+
+func queryMDNS(ip string) {
+}
+
+func queryHostname(ip string) {
+	for {
+		retries := 0
+		hostname, err := net.LookupAddr(ip)
+		if err != nil {
+			retries++
+			if retries >= 3 {
+				log.Printf("no dns record for %s", ip)
+				return
+			}
+		} else {
+			// no mutex needed
+			hostnames[ip] = hostname[0]
+			return
+		}
+	}
 }
 
 // readARP watches a handle for incoming ARP responses we might care about, and prints them.
@@ -139,7 +171,6 @@ func readARP(handle *pcap.Handle, mac net.HardwareAddr, stop chan struct{}) {
 		var packet gopacket.Packet
 		select {
 		case <-stop:
-			log.Printf("find %d hosts", len(liveHosts))
 			return
 		case packet = <-in:
 			arpLayer := packet.Layer(layers.LayerTypeARP)
@@ -154,16 +185,21 @@ func readARP(handle *pcap.Handle, mac net.HardwareAddr, stop chan struct{}) {
 				// got broadcast arp request, consider the source host is alive
 				// TODO RWMutex?
 				mutex.Lock()
-				if _, ok := liveHosts[net.IP(arp.SourceProtAddress).String()]; ok {
-					liveHosts[net.IP(arp.SourceProtAddress).String()] = arp.SourceHwAddress
+				srcIP := net.IP(arp.SourceProtAddress).String()
+				if _, ok := liveHosts[srcIP]; !ok {
+					liveHosts[srcIP] = arp.SourceHwAddress
+					// lookup hostname in another goroutine
+					go queryHostname(srcIP)
 				}
 				mutex.Unlock()
-				//log.Printf("got broadcast arp from %v", net.HardwareAddr(arp.SourceHwAddress))
 				continue
 			}
+
 			mutex.Lock()
-			if _, ok := liveHosts[net.IP(arp.SourceProtAddress).String()]; !ok || len(os.Args) > 1 {
-				liveHosts[net.IP(arp.SourceProtAddress).String()] = arp.SourceHwAddress
+			srcIP := net.IP(arp.SourceProtAddress).String()
+			if _, ok := liveHosts[srcIP]; !ok || len(os.Args) > 1 {
+				liveHosts[srcIP] = arp.SourceHwAddress
+				go queryHostname(srcIP)
 				// Note:  we might get some packets here that aren't responses to ones we've sent,
 				// if for example someone else sends US an ARP request.  Doesn't much matter, though...
 				// all information is good information :)
