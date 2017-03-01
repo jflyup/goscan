@@ -12,6 +12,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	//"github.com/hashicorp/mdns"
+	"flag"
 	"sync"
 	"time"
 )
@@ -19,11 +20,24 @@ import (
 var liveHosts map[string][]byte
 var hostnames map[string]string
 var mutex = &sync.Mutex{}
+var m1 = &sync.Mutex{}
+var target = flag.String("t", "", "target")
 
 func main() {
+	resultFile := flag.String("o", "", "scan result file")
+	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	liveHosts = make(map[string][]byte)
 	hostnames = make(map[string]string)
+	if len(*resultFile) != 0 {
+		f, err := os.OpenFile(*resultFile, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+		if err != nil {
+			log.Printf("can't open %s", resultFile)
+			return
+		}
+		defer f.Close()
+		log.SetOutput(f)
+	}
 	// Get a list of all interfaces.
 	//ifaces, err := net.Interfaces()
 	//if err != nil {
@@ -52,9 +66,7 @@ func main() {
 		// Start up a scan on each interface.
 		go func(iface pcap.Interface) {
 			defer wg.Done()
-			if err := scan(&iface); err != nil {
-				log.Printf("interface %v: %v", iface.Name, err)
-			}
+			scan(&iface)
 		}(iface)
 	}
 	// Wait for all interfaces' scans to complete.  They'll try to run
@@ -102,8 +114,12 @@ func scan(iface *pcap.Interface) error {
 		for _, a := range addrs {
 			if ipnet, ok := a.(*net.IPNet); ok {
 				if ipnet.String() == addr.String() {
-					log.Printf("got mac: %v", i.HardwareAddr)
+					log.Printf("local mac: %v", i.HardwareAddr)
 					mac = i.HardwareAddr
+					mutex.Lock()
+					liveHosts[ipnet.String()] = mac
+					mutex.Unlock()
+					break
 				}
 			}
 		}
@@ -137,6 +153,7 @@ func scan(iface *pcap.Interface) error {
 			log.Printf("IP %s is at %v", k, net.HardwareAddr(v))
 		}
 	}
+	log.Printf("\n")
 	return nil
 }
 
@@ -154,8 +171,9 @@ func queryHostname(ip string) {
 				return
 			}
 		} else {
-			// no mutex needed
+			m1.Lock()
 			hostnames[ip] = hostname[0]
+			m1.Unlock()
 			return
 		}
 	}
@@ -197,13 +215,12 @@ func readARP(handle *pcap.Handle, mac net.HardwareAddr, stop chan struct{}) {
 
 			mutex.Lock()
 			srcIP := net.IP(arp.SourceProtAddress).String()
-			if _, ok := liveHosts[srcIP]; !ok || len(os.Args) > 1 {
+			if _, ok := liveHosts[srcIP]; !ok || len(*target) > 0 {
 				liveHosts[srcIP] = arp.SourceHwAddress
 				go queryHostname(srcIP)
 				// Note:  we might get some packets here that aren't responses to ones we've sent,
 				// if for example someone else sends US an ARP request.  Doesn't much matter, though...
 				// all information is good information :)
-				log.Printf("IP %v is at %v", net.IP(arp.SourceProtAddress), net.HardwareAddr(arp.SourceHwAddress))
 			}
 			mutex.Unlock()
 
@@ -239,8 +256,8 @@ func writeARP(handle *pcap.Handle, mac net.HardwareAddr, addr *net.IPNet) error 
 
 	var count int
 
-	if len(os.Args) > 1 {
-		ip := net.ParseIP(os.Args[1])
+	if len(*target) > 1 {
+		ip := net.ParseIP(*target)
 		log.Printf("sending arp")
 		arp.DstProtAddress = ip.To4()
 		gopacket.SerializeLayers(buf, opts, &eth, &arp)
