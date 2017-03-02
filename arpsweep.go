@@ -22,6 +22,7 @@ var hostnames map[string]string
 var mutex = &sync.Mutex{}
 var m1 = &sync.Mutex{}
 var target = flag.String("t", "", "target")
+var scanTime = flag.Int("T", 10, "scan time")
 
 func main() {
 	resultFile := flag.String("o", "", "scan result file")
@@ -114,10 +115,11 @@ func scan(iface *pcap.Interface) error {
 		for _, a := range addrs {
 			if ipnet, ok := a.(*net.IPNet); ok {
 				if ipnet.String() == addr.String() {
-					log.Printf("local mac: %v", i.HardwareAddr)
+					localhost, _ := os.Hostname()
+					log.Printf("localhost: %s, mac: %v", localhost, i.HardwareAddr)
 					mac = i.HardwareAddr
 					mutex.Lock()
-					liveHosts[ipnet.String()] = mac
+					liveHosts[ipnet.IP.String()] = mac
 					mutex.Unlock()
 					break
 				}
@@ -142,7 +144,7 @@ func scan(iface *pcap.Interface) error {
 	}
 
 	// exit program after scanning for 20s
-	timer := time.NewTimer(time.Second * 20)
+	timer := time.NewTimer(time.Second * time.Duration(*scanTime))
 	<-timer.C
 	close(stop)
 	log.Printf("find %d hosts", len(liveHosts))
