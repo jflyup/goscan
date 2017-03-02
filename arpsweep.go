@@ -27,7 +27,7 @@ var scanTime = flag.Int("T", 10, "scan time")
 func main() {
 	resultFile := flag.String("o", "", "scan result file")
 	flag.Parse()
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	//log.SetFlags(log.LstdFlags | log.Lshortfile)
 	liveHosts = make(map[string][]byte)
 	hostnames = make(map[string]string)
 	if len(*resultFile) != 0 {
@@ -155,7 +155,7 @@ func scan(iface *pcap.Interface) error {
 			log.Printf("IP %s is at %v", k, net.HardwareAddr(v))
 		}
 	}
-	log.Printf("\n")
+	log.Printf("end of scan\n")
 	return nil
 }
 
