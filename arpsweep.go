@@ -14,6 +14,7 @@ import (
 	//"github.com/hashicorp/mdns"
 	"flag"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,7 @@ var mutex = &sync.Mutex{}
 var m1 = &sync.Mutex{}
 var target = flag.String("t", "", "target")
 var scanTime = flag.Int("T", 10, "scan time")
+var stopped int32
 
 func main() {
 	resultFile := flag.String("o", "", "scan result file")
@@ -147,6 +149,7 @@ func scan(iface *pcap.Interface) error {
 	timer := time.NewTimer(time.Second * time.Duration(*scanTime))
 	<-timer.C
 	close(stop)
+	atomic.StoreInt32(&stopped, 1)
 	log.Printf("find %d hosts", len(liveHosts))
 	for k, v := range liveHosts {
 		if name, ok := hostnames[k]; ok {
@@ -275,14 +278,16 @@ func writeARP(handle *pcap.Handle, mac net.HardwareAddr, addr *net.IPNet) error 
 			if _, ok := liveHosts[ip.String()]; !ok && ip.String() != addr.IP.String() {
 				arp.DstProtAddress = []byte(ip)
 				gopacket.SerializeLayers(buf, opts, &eth, &arp)
-				if err := handle.WritePacketData(buf.Bytes()); err != nil {
-					return err
+				if atomic.LoadInt32(&stopped) == 0 {
+					if err := handle.WritePacketData(buf.Bytes()); err != nil {
+						return err
+					}
 				}
 				count++
 			}
 			mutex.Unlock()
 
-			// mimic Fing
+			// mimic Fing's strategy
 			if count == 100 {
 				go writeARP(handle, mac, addr)
 			}
