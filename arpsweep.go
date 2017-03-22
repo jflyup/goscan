@@ -8,11 +8,10 @@ import (
 	"net"
 	"os"
 
+	"flag"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	//"github.com/hashicorp/mdns"
-	"flag"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +23,7 @@ var mutex = &sync.Mutex{}
 var m1 = &sync.Mutex{}
 var target = flag.String("t", "", "target")
 var scanTime = flag.Int("T", 10, "scan time")
+var interval = flag.Int("i", 10, "interval of arp request")
 var stopped int32
 
 func main() {
@@ -50,18 +50,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// Make a channel for results and start listening
-	//	entriesCh := make(chan *mdns.ServiceEntry, 4)
-	//	go func() {
-	//		for entry := range entriesCh {
-	//			log.Printf("Got new entry: %v\n", entry)
-	//		}
-	//	}()
-	//
-	//	// Start the lookup
-	//	mdns.Lookup("_foobar._tcp", entriesCh)
-	//	close(entriesCh)
 
 	var wg sync.WaitGroup
 	for _, iface := range devices {
@@ -141,14 +129,14 @@ func scan(iface *pcap.Interface) error {
 	// Start up a goroutine to read in packet data.
 	stop := make(chan struct{})
 	go readARP(handle, mac, stop)
-	if err := writeARP(handle, mac, addr); err != nil {
-		log.Printf("error writing packets on %v: %v", iface.Name, err)
-	}
 
-	// exit program after scanning for 20s
+	go writeARP(handle, mac, addr)
+	// exit program after scanning for a while
 	timer := time.NewTimer(time.Second * time.Duration(*scanTime))
 	<-timer.C
 	close(stop)
+	log.Printf("stop sending")
+
 	atomic.StoreInt32(&stopped, 1)
 	log.Printf("find %d hosts", len(liveHosts))
 	for k, v := range liveHosts {
@@ -291,7 +279,7 @@ func writeARP(handle *pcap.Handle, mac net.HardwareAddr, addr *net.IPNet) error 
 			if count == 100 {
 				go writeARP(handle, mac, addr)
 			}
-			time.Sleep(time.Millisecond * 10)
+			time.Sleep(time.Millisecond * time.Duration(*interval))
 		}
 	}
 	return nil
