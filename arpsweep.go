@@ -24,6 +24,7 @@ var m1 = &sync.Mutex{}
 var target = flag.String("t", "", "target")
 var scanTime = flag.Int("T", 10, "scan time")
 var interval = flag.Int("i", 10, "interval of arp request")
+var ptrQuery = flag.Bool("r", false, "do reverse DNS lookup")
 var stopped int32
 
 func main() {
@@ -200,7 +201,9 @@ func readARP(handle *pcap.Handle, mac net.HardwareAddr, stop chan struct{}) {
 				if _, ok := liveHosts[srcIP]; !ok {
 					liveHosts[srcIP] = arp.SourceHwAddress
 					// lookup hostname in another goroutine
-					go queryHostname(srcIP)
+					if *ptrQuery {
+						go queryHostname(srcIP)
+					}
 				}
 				mutex.Unlock()
 				continue
@@ -210,7 +213,9 @@ func readARP(handle *pcap.Handle, mac net.HardwareAddr, stop chan struct{}) {
 			srcIP := net.IP(arp.SourceProtAddress).String()
 			if _, ok := liveHosts[srcIP]; !ok || len(*target) > 0 {
 				liveHosts[srcIP] = arp.SourceHwAddress
-				go queryHostname(srcIP)
+				if *ptrQuery {
+					go queryHostname(srcIP)
+				}
 				// Note:  we might get some packets here that aren't responses to ones we've sent,
 				// if for example someone else sends US an ARP request.  Doesn't much matter, though...
 				// all information is good information :)
