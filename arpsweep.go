@@ -23,7 +23,7 @@ var mutex = &sync.Mutex{}
 var m1 = &sync.Mutex{}
 var target = flag.String("t", "", "target")
 var scanTime = flag.Int("T", 10, "scan time")
-var interval = flag.Int("i", 10, "interval of arp request")
+var interval = flag.Int("i", 10, "interval of arp request, in ms")
 var ptrQuery = flag.Bool("r", false, "do reverse DNS lookup")
 var stopped int32
 
@@ -136,10 +136,9 @@ func scan(iface *pcap.Interface) error {
 	timer := time.NewTimer(time.Second * time.Duration(*scanTime))
 	<-timer.C
 	close(stop)
-	log.Printf("stop sending")
 
 	atomic.StoreInt32(&stopped, 1)
-	log.Printf("find %d hosts", len(liveHosts))
+	log.Printf("find %d hosts in %ds", len(liveHosts), *scanTime)
 	for k, v := range liveHosts {
 		if name, ok := hostnames[k]; ok {
 			log.Printf("IP %s(%s) is at %v", k, name, net.HardwareAddr(v))
