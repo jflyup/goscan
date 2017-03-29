@@ -138,7 +138,7 @@ func scan(iface *pcap.Interface) error {
 	close(stop)
 
 	atomic.StoreInt32(&stopped, 1)
-	log.Printf("find %d hosts in %ds", len(liveHosts), *scanTime)
+	log.Printf("find %d hosts in %ds with interval %d", len(liveHosts), *scanTime, *interval)
 	for k, v := range liveHosts {
 		if name, ok := hostnames[k]; ok {
 			log.Printf("IP %s(%s) is at %v", k, name, net.HardwareAddr(v))
